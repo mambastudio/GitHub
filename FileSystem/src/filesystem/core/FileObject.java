@@ -5,18 +5,18 @@
  */
 package filesystem.core;
 
+import java.awt.Desktop;
+import java.io.File;
 import java.io.IOException;
 import java.net.URI;
-import java.nio.file.DirectoryStream;
 import java.nio.file.FileSystem;
-import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.WatchService;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.Arrays;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -33,9 +33,24 @@ public class FileObject
         this(Paths.get(path));
     }
     
+    public FileObject(File file)
+    {
+        this(file.toPath());
+    }
+    
+    public FileObject(URI uri)
+    {
+        this(new File(uri));
+    }
+    
+    public FileObject()
+    {
+        this(Paths.get(".").toAbsolutePath());
+    }
+    
     public FileObject(Path path)
     {
-        if(path.toString().toLowerCase().endsWith(".zip") && !path.getFileSystem().toString().endsWith(".zip"))
+        /*if(path.toString().toLowerCase().endsWith(".zip") && !path.getFileSystem().toString().endsWith(".zip"))
         {
             try 
             {                
@@ -49,8 +64,31 @@ public class FileObject
                 Logger.getLogger(FileObject.class.getName()).log(Level.SEVERE, null, ex);
             }            
         }
-        else
+else */
+        {            
             this.path = path;
+        }
+    }
+    
+    public static FileObject[] getSystemRootArray()
+    {
+        File[] fileRoots = File.listRoots();
+        FileObject[] fileobjectRoots = new FileObject[fileRoots.length];
+        for(int i = 0; i<fileRoots.length; i++)
+        {
+            FileObject f = new FileObject(fileRoots[i]);
+            fileobjectRoots[i] = f;
+        }
+        
+        return fileobjectRoots;
+    }
+    
+    public static ArrayList<FileObject> getSystemRootList()
+    {
+        ArrayList<FileObject> rootList = new ArrayList<>();
+        FileObject[] rootArray = getSystemRootArray();        
+        rootList.addAll(Arrays.asList(rootArray));
+        return rootList;
     }
     
     public boolean isFileSystem()
@@ -73,9 +111,41 @@ public class FileObject
         return Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS);
     }
     
+    public boolean isNotDirectory()
+    {
+        return !isDirectory();
+    }
+    
     public FileSystem getFileSystem()
     {        
         return path.getFileSystem();
+    }
+    
+    public String getRootName()
+    {
+        return path.getRoot().toString();
+    }
+        
+    public WatchService getNewWatchService()
+    {
+        try {
+            return getFileSystem().newWatchService();
+        } catch (IOException ex) {
+            Logger.getLogger(FileObject.class.getName()).log(Level.SEVERE, null, ex);
+        }
+        return null;
+    }
+    
+    public boolean deleteOnExit()
+    {
+        try {
+            return Files.deleteIfExists(path);
+        } catch (IOException ex) {
+            Logger.getLogger(FileObject.class.getName()).log(Level.SEVERE, null, ex);
+        }
+        
+        return false;
+       
     }
     
     public Path getPath()
@@ -87,17 +157,46 @@ public class FileObject
     {
         if(Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS))
         {
-            ArrayList<FileObject> children = new ArrayList<>();
-            try (DirectoryStream<Path> dirs = Files.newDirectoryStream(path)) 
-            {                
-                for(Path dir : dirs)                
-                    children.add(new FileObject(dir));               
-            }
-            catch(IOException ex)
-            {
-                Logger.getLogger(FileObject.class.getName()).log(Level.SEVERE, null, ex);
-            }            
-            return children.toArray(new FileObject[children.size()]);
+            File directory = getJavaFile();
+            File[] files = directory.listFiles();
+            FileObject[] fileObjects = new FileObject[files.length];
+            
+            for(int i = 0; i<files.length; i++)
+                fileObjects[i] = new FileObject(files[i]);
+            
+            return fileObjects;
+        }
+        
+        return null;
+    }
+    
+    public FileObject[] getChildren(String... extensions)
+    {        
+        if(Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS))
+        {
+            File directory = getJavaFile();
+            File[] files = null;
+            if(extensions.length != 0)        
+                files = directory.listFiles(file -> {
+                FileObject fo = new FileObject(file);
+                if(fo.isDirectory()) return true;
+                boolean accept = false;                
+                for(String extension : extensions)
+                    accept |= fo.hasFileExtension(extension);
+                
+                return accept;
+            }); 
+            else
+                files = directory.listFiles();
+            
+            if(files.length == 0) return null;
+            
+            FileObject[] fileObjects = new FileObject[files.length];
+            
+            for(int i = 0; i<files.length; i++)
+                fileObjects[i] = new FileObject(files[i]);
+            
+            return fileObjects;
         }
         return null;
     }
@@ -119,5 +218,43 @@ public class FileObject
             return path.getFileSystem().toString();
         else
             return path.toString();
+    }
+    
+    public String getFileExtension()            
+    {
+        String fileName = getName();
+        int index = fileName.lastIndexOf(".");
+        
+        if (index > 0) 
+            return fileName.substring(index + 1); 
+        else 
+            return null;
+    }
+    
+    public boolean hasFileExtension(String extension)
+    {
+        return (getFileExtension() != null) && (getFileExtension().contains(extension));
+    }
+    
+    public File getJavaFile()
+    {
+        return path.toFile();
+    }
+    
+    public void openNative()
+    {
+        if(Desktop.isDesktopSupported())
+            try {
+                Desktop.getDesktop().open(path.toFile());
+        } catch (IOException ex) {
+            Logger.getLogger(FileObject.class.getName()).log(Level.SEVERE, null, ex);
+        }
+        else
+            throw new UnsupportedOperationException("No desktop application related to the file");
+    }
+    
+    public boolean equals(FileObject file)
+    {
+        return this.getPath().equals(file.getPath());
     }
 }
